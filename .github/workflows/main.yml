@@ -1,4 +1,5 @@
-name: macPad macOS Build Diagnostics
+```yaml
+name: macPad Build Prerequisite Check
 
 on:
   workflow_dispatch:
@@ -7,92 +8,66 @@ permissions:
   contents: read
 
 jobs:
-  diagnostics:
-    name: Inspect macOS build environment
+  prerequisites:
+    name: Check macOS build prerequisites
     runs-on: macos-15
     timeout-minutes: 15
 
     steps:
-      - name: Check out fork
+      - name: Check out macPad
         uses: actions/checkout@v4
 
-      - name: Show macOS and developer tools
+      - name: Inspect Apple toolchain
         run: |
           set -eu
           sw_vers
           uname -m
           xcode-select -p
-          clang --version
-          python3 --version
-          git --version
+          xcodebuild -showsdks
+          xcrun --sdk macosx --show-sdk-path
+          xcrun --find clang
+          xcrun --find ld
+          xcrun --find dyld_info
+          xcrun --find otool
 
-      - name: Check project build requirements
+      - name: Prepare GNU Make on temporary runner
         run: |
           set -eu
+          brew --version
+          if ! command -v gmake >/dev/null 2>&1; then
+            brew install make
+          fi
+          gmake --version
+          command -v gmake
+
+      - name: Check Theos availability without building
+        run: |
+          set -eu
+          echo "=== Check Theos repository ==="
+          git ls-remote https://github.com/theos/theos.git HEAD
+
+          echo "=== Check project build requirements ==="
           test -f Makefile
           test -f config/production.mk
           test -f MacWSWindowing/Makefile
           test -f misc/macws_artifact_contract.py
           test -f misc/deploy_macwswindowing.sh
-          test -f misc/build.sh
+
           echo "Required project files are present."
-          echo "This workflow does not build, package, or deploy anything."
+          echo "No project build, package, or deployment was performed."
 
-      - name: Read-only check of build tools and SDKs
+      - name: Check arm64e build requirements
         run: |
           set -eu
+          echo "=== Project architecture settings ==="
+          grep -nE 'TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT' \
+            Makefile MacWSWindowing/Makefile
 
-          echo "=== Build tools ==="
-          for tool in xcodebuild xcrun clang python3 git; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              echo "FOUND: $tool -> $(command -v "$tool")"
-            else
-              echo "MISSING: $tool"
-            fi
-          done
-
-          echo "=== Xcode SDKs ==="
-          xcodebuild -showsdks
-
-          echo "=== macOS SDK path ==="
-          xcrun --sdk macosx --show-sdk-path
-
-          echo "=== Optional linker tools ==="
-          for tool in gmake ld64 dyld_info otool; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              echo "FOUND: $tool -> $(command -v "$tool")"
-            else
-              echo "MISSING: $tool"
-            fi
-          done
-
-          echo "=== Theos and project configuration ==="
-          grep -nE 'THEOS|TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT|dyld_info|FINALPACKAGE|OPTFLAG' \
-            Makefile MacWSWindowing/Makefile config/production.mk \
-            misc/build.sh misc/deploy_macwswindowing.sh
-
-      - name: Read-only inspect Theos and Apple linker
-        run: |
-          set -eu
-
-          echo "=== Xcode linker ==="
+          echo "=== Apple linker tools ==="
           xcrun --find ld
-          xcrun --find clang
-          xcode-select -p
+          xcrun --find dyld_info
+          xcrun --find otool
 
-          echo "=== GNU make alternatives ==="
-          command -v make || true
-          make --version || true
-          ls -l /opt/homebrew/bin/gmake /usr/local/bin/gmake 2>/dev/null || true
-
-          echo "=== Theos checkout ==="
-          if [ -d "$HOME/theos" ]; then
-            echo "Found $HOME/theos"
-            ls "$HOME/theos/makefiles" | head -30
-          else
-            echo "No Theos at $HOME/theos"
-          fi
-
-          echo "=== Project build scripts ==="
-          sed -n '1,100p' misc/deploy_macwswindowing.sh
-          sed -n '1,90p' MacWSWindowing/Makefile
+          echo "Prerequisite checks completed."
+          echo "No iPad connection or device changes were made."
+```
