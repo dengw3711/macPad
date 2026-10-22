@@ -70,3 +70,29 @@ jobs:
           grep -nE 'THEOS|TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT|dyld_info|FINALPACKAGE|OPTFLAG' \
             Makefile MacWSWindowing/Makefile config/production.mk \
             misc/build.sh misc/deploy_macwswindowing.sh
+
+      - name: Read-only inspect Theos and Apple linker
+        run: |
+          set -eu
+
+          echo "=== Xcode linker ==="
+          xcrun --find ld
+          xcrun --find clang
+          xcode-select -p
+
+          echo "=== GNU make alternatives ==="
+          command -v make || true
+          make --version || true
+          ls -l /opt/homebrew/bin/gmake /usr/local/bin/gmake 2>/dev/null || true
+
+          echo "=== Theos checkout ==="
+          if [ -d "$HOME/theos" ]; then
+            echo "Found $HOME/theos"
+            ls "$HOME/theos/makefiles" | head -30
+          else
+            echo "No Theos at $HOME/theos"
+          fi
+
+          echo "=== Project build scripts ==="
+          sed -n '1,100p' misc/deploy_macwswindowing.sh
+          sed -n '1,90p' MacWSWindowing/Makefile
