@@ -1,0 +1,40 @@
+
+name: macPad macOS Build Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    name: Inspect macOS build environment
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+
+      - name: Show macOS and developer tools
+        run: |
+          set -eu
+          sw_vers
+          uname -m
+          xcode-select -p
+          clang --version
+          python3 --version
+          git --version
+
+      - name: Check project build requirements
+        run: |
+          set -eu
+          test -f Makefile
+          test -f config/production.mk
+          test -f MacWSWindowing/Makefile
+          test -f misc/macws_artifact_contract.py
+          test -f misc/deploy_macwswindowing.sh
+          test -f misc/build.sh
+          echo "Required project files are present."
+          echo "This workflow does not build, package, or deploy anything."
