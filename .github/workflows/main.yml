@@ -1,4 +1,3 @@
-
 name: macPad macOS Build Diagnostics
 
 on:
@@ -38,3 +37,36 @@ jobs:
           test -f misc/build.sh
           echo "Required project files are present."
           echo "This workflow does not build, package, or deploy anything."
+
+      - name: Read-only check of build tools and SDKs
+        run: |
+          set -eu
+
+          echo "=== Build tools ==="
+          for tool in xcodebuild xcrun clang python3 git; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "FOUND: $tool -> $(command -v "$tool")"
+            else
+              echo "MISSING: $tool"
+            fi
+          done
+
+          echo "=== Xcode SDKs ==="
+          xcodebuild -showsdks
+
+          echo "=== macOS SDK path ==="
+          xcrun --sdk macosx --show-sdk-path
+
+          echo "=== Optional linker tools ==="
+          for tool in gmake ld64 dyld_info otool; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "FOUND: $tool -> $(command -v "$tool")"
+            else
+              echo "MISSING: $tool"
+            fi
+          done
+
+          echo "=== Theos and project configuration ==="
+          grep -nE 'THEOS|TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT|dyld_info|FINALPACKAGE|OPTFLAG' \
+            Makefile MacWSWindowing/Makefile config/production.mk \
+            misc/build.sh misc/deploy_macwswindowing.sh
