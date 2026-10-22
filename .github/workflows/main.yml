@@ -1,4 +1,3 @@
-```yaml
 name: macPad Build Prerequisite Check
 
 on:
@@ -20,11 +19,16 @@ jobs:
       - name: Inspect Apple toolchain
         run: |
           set -eu
+          echo "=== macOS version ==="
           sw_vers
           uname -m
+
+          echo "=== Xcode ==="
           xcode-select -p
           xcodebuild -showsdks
           xcrun --sdk macosx --show-sdk-path
+
+          echo "=== Apple build tools ==="
           xcrun --find clang
           xcrun --find ld
           xcrun --find dyld_info
@@ -33,25 +37,31 @@ jobs:
       - name: Prepare GNU Make on temporary runner
         run: |
           set -eu
+          echo "=== Homebrew ==="
           brew --version
+
           if ! command -v gmake >/dev/null 2>&1; then
             brew install make
           fi
+
+          echo "=== GNU Make ==="
           gmake --version
           command -v gmake
 
-      - name: Check Theos availability without building
+      - name: Check Theos repository and project files
         run: |
           set -eu
-          echo "=== Check Theos repository ==="
+
+          echo "=== Check Theos repository access ==="
           git ls-remote https://github.com/theos/theos.git HEAD
 
-          echo "=== Check project build requirements ==="
+          echo "=== Check required project files ==="
           test -f Makefile
           test -f config/production.mk
           test -f MacWSWindowing/Makefile
           test -f misc/macws_artifact_contract.py
           test -f misc/deploy_macwswindowing.sh
+          test -f misc/build_on_ios.sh
 
           echo "Required project files are present."
           echo "No project build, package, or deployment was performed."
@@ -59,6 +69,7 @@ jobs:
       - name: Check arm64e build requirements
         run: |
           set -eu
+
           echo "=== Project architecture settings ==="
           grep -nE 'TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT' \
             Makefile MacWSWindowing/Makefile
@@ -70,4 +81,3 @@ jobs:
 
           echo "Prerequisite checks completed."
           echo "No iPad connection or device changes were made."
-```
