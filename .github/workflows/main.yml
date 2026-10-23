@@ -1,234 +1,234 @@
 name: macPad Build and Validate
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-name: Build and inspect macPad on macOS
-runs-on: macos-15
-timeout-minutes: 30
+  build:
+    name: Build and inspect macPad on macOS
+    runs-on: macos-15
+    timeout-minutes: 30
 
-steps:
-  - name: Check out macPad
-    uses: actions/checkout@v4
+    steps:
+      - name: Check out macPad
+        uses: actions/checkout@v4
 
-  - name: Prepare build tools
-    run: |
-      set -eu
+      - name: Prepare build tools
+        run: |
+          set -eu
 
-      if ! command -v gmake >/dev/null 2>&1; then
-        brew install make
-      fi
+          if ! command -v gmake >/dev/null 2>&1; then
+            brew install make
+          fi
 
-      if ! command -v ldid >/dev/null 2>&1; then
-        brew install ldid
-      fi
+          if ! command -v ldid >/dev/null 2>&1; then
+            brew install ldid
+          fi
 
-      echo "=== macOS ==="
-      sw_vers
-      uname -m
+          echo "=== macOS ==="
+          sw_vers
+          uname -m
 
-      echo "=== Xcode SDKs ==="
-      xcrun --sdk iphoneos --show-sdk-path
-      xcrun --sdk macosx --show-sdk-path
+          echo "=== Xcode SDKs ==="
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk macosx --show-sdk-path
 
-      echo "=== GNU Make ==="
-      gmake --version
+          echo "=== GNU Make ==="
+          gmake --version
 
-      echo "=== ldid ==="
-      ldid -h
+          echo "=== ldid ==="
+          ldid -h
 
-  - name: Install Theos in temporary runner
-    run: |
-      set -eu
+      - name: Install Theos in temporary runner
+        run: |
+          set -eu
 
-      export THEOS="$RUNNER_TEMP/theos"
-      git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          export THEOS="$RUNNER_TEMP/theos"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-      SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
-      SDK_NAME="$(basename "$SDK_PATH")"
+          SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          SDK_NAME="$(basename "$SDK_PATH")"
 
-      mkdir -p "$THEOS/sdks"
-      if [ ! -e "$THEOS/sdks/$SDK_NAME" ]; then
-        ln -s "$SDK_PATH" "$THEOS/sdks/$SDK_NAME"
-      fi
+          mkdir -p "$THEOS/sdks"
+          if [ ! -e "$THEOS/sdks/$SDK_NAME" ]; then
+            ln -s "$SDK_PATH" "$THEOS/sdks/$SDK_NAME"
+          fi
 
-      MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
-      MACOS_SDK_NAME="$(basename "$MACOS_SDK_PATH")"
+          MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          MACOS_SDK_NAME="$(basename "$MACOS_SDK_PATH")"
 
-      if [ ! -e "$THEOS/sdks/$MACOS_SDK_NAME" ]; then
-        ln -s "$MACOS_SDK_PATH" "$THEOS/sdks/$MACOS_SDK_NAME"
-      fi
+          if [ ! -e "$THEOS/sdks/$MACOS_SDK_NAME" ]; then
+            ln -s "$MACOS_SDK_PATH" "$THEOS/sdks/$MACOS_SDK_NAME"
+          fi
 
-      echo "THEOS=$THEOS" >> "$GITHUB_ENV"
-      echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
 
-      test -f "$THEOS/makefiles/common.mk"
+          test -f "$THEOS/makefiles/common.mk"
 
-      echo "=== Theos SDKs ==="
-      ls -la "$THEOS/sdks"
+          echo "=== Theos SDKs ==="
+          ls -la "$THEOS/sdks"
 
-      echo "Theos setup completed."
+          echo "Theos setup completed."
 
-  - name: Check project build requirements
-    run: |
-      set -eu
+      - name: Check project build requirements
+        run: |
+          set -eu
 
-      for f in \
-        Makefile \
-        config/production.mk \
-        MacWSWindowing/Makefile \
-        misc/macws_artifact_contract.py \
-        misc/build_on_ios.sh \
-        misc/deploy_macwswindowing.sh; do
-        if test -f "$f"; then
-          echo "OK: $f"
-        else
-          echo "MISSING: $f"
-          exit 1
-        fi
-      done
+          for f in \
+            Makefile \
+            config/production.mk \
+            MacWSWindowing/Makefile \
+            misc/macws_artifact_contract.py \
+            misc/build_on_ios.sh \
+            misc/deploy_macwswindowing.sh; do
+            if test -f "$f"; then
+              echo "OK: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
 
-      echo "=== Architecture and target settings ==="
-      grep -nE 'TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT' \
-        Makefile MacWSWindowing/Makefile
+          echo "=== Architecture and target settings ==="
+          grep -nE 'TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT' \
+            Makefile MacWSWindowing/Makefile
 
-      echo "=== Apple linker tools ==="
-      xcrun --find ld
-      xcrun --find dyld_info
-      xcrun --find otool
+          echo "=== Apple linker tools ==="
+          xcrun --find ld
+          xcrun --find dyld_info
+          xcrun --find otool
 
-  - name: Preflight full package build
-    run: |
-      set -eu
+      - name: Preflight full package build
+        run: |
+          set -eu
 
-      REPORT="$RUNNER_TEMP/macpad-preflight"
-      mkdir -p "$REPORT"
+          REPORT="$RUNNER_TEMP/macpad-preflight"
+          mkdir -p "$REPORT"
 
-      echo "=== Build tools ==="
-      for tool in gmake clang dpkg-deb lipo nm python3; do
-        if command -v "$tool" >/dev/null 2>&1; then
-          echo "OK: $tool -> $(command -v "$tool")"
-        else
-          echo "MISSING: $tool"
-        fi
-      done | tee "$REPORT/tools.txt"
+          echo "=== Build tools ==="
+          for tool in gmake clang dpkg-deb lipo nm python3; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "OK: $tool -> $(command -v "$tool")"
+            else
+              echo "MISSING: $tool"
+            fi
+          done | tee "$REPORT/tools.txt"
 
-      echo "=== SDK paths ==="
-      for sdk in iphoneos macosx; do
-        if SDK_PATH="$(xcrun --sdk "$sdk" --show-sdk-path 2>/dev/null)"; then
-          echo "OK: $sdk -> $SDK_PATH"
-        else
-          echo "MISSING SDK: $sdk"
-        fi
-      done | tee "$REPORT/sdks.txt"
+          echo "=== SDK paths ==="
+          for sdk in iphoneos macosx; do
+            if SDK_PATH="$(xcrun --sdk "$sdk" --show-sdk-path 2>/dev/null)"; then
+              echo "OK: $sdk -> $SDK_PATH"
+            else
+              echo "MISSING SDK: $sdk"
+            fi
+          done | tee "$REPORT/sdks.txt"
 
-      echo "=== Theos SDKs ==="
-      ls -la "$THEOS/sdks" | tee "$REPORT/theos-sdks.txt"
+          echo "=== Theos SDKs ==="
+          ls -la "$THEOS/sdks" | tee "$REPORT/theos-sdks.txt"
 
-      echo "=== Artifact contract help ==="
-      python3 misc/macws_artifact_contract.py --help \
-        > "$REPORT/artifact-contract-help.txt" 2>&1 || true
-      cat "$REPORT/artifact-contract-help.txt"
+          echo "=== Artifact contract help ==="
+          python3 misc/macws_artifact_contract.py --help \
+            > "$REPORT/artifact-contract-help.txt" 2>&1 || true
+          cat "$REPORT/artifact-contract-help.txt"
 
-      echo "=== Package configuration ==="
-      grep -nE \
-        'aggregate.mk|after-stage|MACWS_WINDOWING_CROSS_PREBUILT|verify-package|SUBPROJECTS' \
-        Makefile misc/macws_artifact_contract.py \
-        | tee "$REPORT/package-settings.txt" || true
+          echo "=== Package configuration ==="
+          grep -nE \
+            'aggregate.mk|after-stage|MACWS_WINDOWING_CROSS_PREBUILT|verify-package|SUBPROJECTS' \
+            Makefile misc/macws_artifact_contract.py \
+            | tee "$REPORT/package-settings.txt" || true
 
-      echo "=== Theos package output configuration ==="
-      grep -nE \
-        'THEOS_PACKAGE_DIR|THEOS_STAGING_DIR|FINALPACKAGE|PACKAGE_SCHEME' \
-        "$THEOS/makefiles/package.mk" \
-        "$THEOS/makefiles/common.mk" \
-        > "$REPORT/theos-package-settings.txt" 2>&1 || true
-      cat "$REPORT/theos-package-settings.txt"
+          echo "=== Theos package output configuration ==="
+          grep -nE \
+            'THEOS_PACKAGE_DIR|THEOS_STAGING_DIR|FINALPACKAGE|PACKAGE_SCHEME' \
+            "$THEOS/makefiles/package.mk" \
+            "$THEOS/makefiles/common.mk" \
+            > "$REPORT/theos-package-settings.txt" 2>&1 || true
+          cat "$REPORT/theos-package-settings.txt"
 
-      echo "Preflight inspection completed. No package was built or installed."
+          echo "Preflight inspection completed. No package was built or installed."
 
-  - name: Build MacWSWindowing
-    run: |
-      set -eu
+      - name: Build MacWSWindowing
+        run: |
+          set -eu
 
-      gmake -C MacWSWindowing all \
-        FINALPACKAGE=1 \
-        STRIP=0 \
-        OPTFLAG=-O2 \
-        THEOS_PACKAGE_SCHEME=rootless \
-        GO_EASY_ON_ME=1
+          gmake -C MacWSWindowing all \
+            FINALPACKAGE=1 \
+            STRIP=0 \
+            OPTFLAG=-O2 \
+            THEOS_PACKAGE_SCHEME=rootless \
+            GO_EASY_ON_ME=1
 
-      echo "=== Locate build output ==="
-      find MacWSWindowing/.theos -type f \
-        -name 'MacWSWindowing.dylib' -print
+          echo "=== Locate build output ==="
+          find MacWSWindowing/.theos -type f \
+            -name 'MacWSWindowing.dylib' -print
 
-      test -f MacWSWindowing/.theos/obj/MacWSWindowing.dylib
+          test -f MacWSWindowing/.theos/obj/MacWSWindowing.dylib
 
-      mkdir -p "$RUNNER_TEMP/macpad-build"
-      cp MacWSWindowing/.theos/obj/MacWSWindowing.dylib \
-        "$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+          mkdir -p "$RUNNER_TEMP/macpad-build"
+          cp MacWSWindowing/.theos/obj/MacWSWindowing.dylib \
+            "$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
 
-  - name: Validate arm64e authenticated bindings
-    run: |
-      set -eu
+      - name: Validate arm64e authenticated bindings
+        run: |
+          set -eu
 
-      BINARY="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+          BINARY="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
 
-      file "$BINARY"
+          file "$BINARY"
 
-      xcrun dyld_info -arch arm64e -fixups "$BINARY" \
-        > "$RUNNER_TEMP/macpad-build/fixups.txt"
+          xcrun dyld_info -arch arm64e -fixups "$BINARY" \
+            > "$RUNNER_TEMP/macpad-build/fixups.txt"
 
-      echo "=== Check authenticated constant-string bindings ==="
-      grep -E \
-        'auth-bind.*key=DA.*__cfstring|auth-bind.*__CFConstantStringClassReference' \
-        "$RUNNER_TEMP/macpad-build/fixups.txt"
+          echo "=== Check authenticated constant-string bindings ==="
+          grep -E \
+            'auth-bind.*key=DA.*__cfstring|auth-bind.*__CFConstantStringClassReference' \
+            "$RUNNER_TEMP/macpad-build/fixups.txt"
 
-      if grep -E 'bind.*__CFConstantStringClassReference' \
-        "$RUNNER_TEMP/macpad-build/fixups.txt" \
-        | grep -v 'auth-bind'; then
-        echo "ERROR: Found a non-authenticated constant-string binding."
-        exit 1
-      fi
+          if grep -E 'bind.*__CFConstantStringClassReference' \
+            "$RUNNER_TEMP/macpad-build/fixups.txt" \
+            | grep -v 'auth-bind'; then
+            echo "ERROR: Found a non-authenticated constant-string binding."
+            exit 1
+          fi
 
-      echo "=== Linked libraries ==="
-      xcrun otool -L "$BINARY" \
-        | tee "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+          echo "=== Linked libraries ==="
+          xcrun otool -L "$BINARY" \
+            | tee "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
 
-      if grep -E '^[[:space:]]*/Library/' \
-        "$RUNNER_TEMP/macpad-build/linked-libraries.txt"; then
-        echo "ERROR: Found a rootful /Library dependency."
-        exit 1
-      fi
+          if grep -E '^[[:space:]]*/Library/' \
+            "$RUNNER_TEMP/macpad-build/linked-libraries.txt"; then
+            echo "ERROR: Found a rootful /Library dependency."
+            exit 1
+          fi
 
-      grep -F \
-        '@rpath/CydiaSubstrate.framework/CydiaSubstrate' \
-        "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+          grep -F \
+            '@rpath/CydiaSubstrate.framework/CydiaSubstrate' \
+            "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
 
-  - name: Record checksums and build details
-    run: |
-      set -eu
+      - name: Record checksums and build details
+        run: |
+          set -eu
 
-      cd "$RUNNER_TEMP/macpad-build"
+          cd "$RUNNER_TEMP/macpad-build"
 
-      shasum -a 256 MacWSWindowing.dylib | tee SHA256SUMS
-      file MacWSWindowing.dylib | tee binary-info.txt
-      xcrun --sdk iphoneos --show-sdk-version > sdk-version.txt
-      git -C "$GITHUB_WORKSPACE" rev-parse HEAD > source-commit.txt
+          shasum -a 256 MacWSWindowing.dylib | tee SHA256SUMS
+          file MacWSWindowing.dylib | tee binary-info.txt
+          xcrun --sdk iphoneos --show-sdk-version > sdk-version.txt
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > source-commit.txt
 
-      echo "Component build and validation completed."
+          echo "Component build and validation completed."
 
-  - name: Upload component build and inspection reports
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: macPad-build-inspection
-      path: |
-        ${{ runner.temp }}/macpad-build/
-        ${{ runner.temp }}/macpad-preflight/
-      if-no-files-found: warn
-      retention-days: 7
+      - name: Upload component build and inspection reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macPad-build-inspection
+          path: |
+            ${{ runner.temp }}/macpad-build/
+            ${{ runner.temp }}/macpad-preflight/
+          if-no-files-found: warn
+          retention-days: 7
