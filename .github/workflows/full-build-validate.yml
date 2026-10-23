@@ -1,0 +1,198 @@
+
+name: macPad Full Build and Package Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and validate full rootless package
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install make ldid dpkg
+          echo "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
+          echo "PATH=$RUNNER_TEMP/theos/bin:$PATH" >> "$GITHUB_ENV"
+
+      - name: Install Theos and SDK links
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+          mkdir -p "$THEOS/sdks"
+          ln -s "$IOS_SDK" "$THEOS/sdks/$(basename "$IOS_SDK")"
+          ln -s "$MAC_SDK" "$THEOS/sdks/$(basename "$MAC_SDK")"
+
+          test -f "$THEOS/makefiles/common.mk"
+          gmake --version
+          dpkg-deb --version
+          xcrun --find ld
+          xcrun --find dyld_info
+
+      - name: Check required project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in \
+            Makefile \
+            config/production.mk \
+            MacWSWindowing/Makefile \
+            misc/macws_artifact_contract.py \
+            misc/audit_runtime_switches.py \
+            layout/DEBIAN/postinst; do
+            test -f "$f" || {
+              echo "Missing required file: $f"
+              exit 1
+            }
+          done
+
+      - name: Snapshot Windowing sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/macpad-build"
+          python3 misc/macws_artifact_contract.py snapshot \
+            --root "$GITHUB_WORKSPACE" \
+            --manifest "$RUNNER_TEMP/macpad-build/source-snapshot.json"
+
+      - name: Build MacWSWindowing
+        shell: bash
+        run: |
+          set -euo pipefail
+          gmake -C MacWSWindowing all \
+            FINALPACKAGE=1 \
+            STRIP=0 \
+            OPTFLAG=-O2 \
+            THEOS_PACKAGE_SCHEME=rootless \
+            GO_EASY_ON_ME=1
+
+          BINARY="$GITHUB_WORKSPACE/MacWSWindowing/.theos/obj/MacWSWindowing.dylib"
+          test -s "$BINARY"
+
+          cp "$BINARY" "$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+
+          python3 misc/macws_artifact_contract.py create \
+            --root "$GITHUB_WORKSPACE" \
+            --binary "$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib" \
+            --manifest "$RUNNER_TEMP/macpad-build/MacWSWindowing.build.json" \
+            --source-snapshot "$RUNNER_TEMP/macpad-build/source-snapshot.json"
+
+      - name: Validate Windowing architecture and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          BINARY="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+
+          file "$BINARY"
+          xcrun dyld_info -arch arm64e -fixups "$BINARY" \
+            > "$RUNNER_TEMP/macpad-build/fixups.txt"
+
+          grep -E \
+            'auth-bind.*key=DA.*__cfstring|auth-bind.*__CFConstantStringClassReference' \
+            "$RUNNER_TEMP/macpad-build/fixups.txt"
+
+          if grep -E 'bind.*__CFConstantStringClassReference' \
+              "$RUNNER_TEMP/macpad-build/fixups.txt" | grep -v 'auth-bind'; then
+            echo "ERROR: Non-authenticated constant-string binding found."
+            exit 1
+          fi
+
+          xcrun otool -L "$BINARY" \
+            | tee "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+
+          if grep -E '^[[:space:]]*/Library/' \
+              "$RUNNER_TEMP/macpad-build/linked-libraries.txt"; then
+            echo "ERROR: Rootful dependency found."
+            exit 1
+          fi
+
+          grep -F '@rpath/CydiaSubstrate.framework/CydiaSubstrate' \
+            "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+
+      - name: Build rootless Debian package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export MACWS_WINDOWING_CROSS_PREBUILT="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+
+          gmake \
+            FINALPACKAGE=1 \
+            STRIP=0 \
+            OPTFLAG=-O2 \
+            THEOS_PACKAGE_SCHEME=rootless \
+            GO_EASY_ON_ME=1 \
+            MACWS_WINDOWING_CROSS_PREBUILT="$MACWS_WINDOWING_CROSS_PREBUILT" \
+            package
+
+          find packages -maxdepth 1 -type f -name '*.deb' -print
+          test -n "$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)"
+
+      - name: Verify package contents and production policy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BINARY="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+          MANIFEST="$RUNNER_TEMP/macpad-build/MacWSWindowing.build.json"
+          PACKAGE="$(find packages -maxdepth 1 -type f -name '*.deb' -print \
+            | xargs ls -t | head -n 1)"
+
+          test -d .theos/_
+          test -s "$BINARY"
+          test -s "$MANIFEST"
+          test -s "$PACKAGE"
+
+          python3 misc/macws_artifact_contract.py verify-package \
+            --root "$GITHUB_WORKSPACE" \
+            --binary "$BINARY" \
+            --manifest "$MANIFEST" \
+            --staging "$GITHUB_WORKSPACE/.theos/_" \
+            --package "$GITHUB_WORKSPACE/$PACKAGE"
+
+          dpkg-deb --info "$PACKAGE" \
+            | tee "$RUNNER_TEMP/macpad-build/package-info.txt"
+
+          shasum -a 256 "$PACKAGE" \
+            | tee "$RUNNER_TEMP/macpad-build/package-SHA256SUMS"
+
+          echo "Package verification passed."
+          echo "Nothing was installed on an iPad."
+
+      - name: Record source and toolchain details
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/macpad-build"
+          git rev-parse HEAD \
+            > "$RUNNER_TEMP/macpad-build/source-commit.txt" || true
+          sw_vers \
+            > "$RUNNER_TEMP/macpad-build/macos-version.txt" || true
+          xcrun --sdk iphoneos --show-sdk-version \
+            > "$RUNNER_TEMP/macpad-build/ios-sdk-version.txt" || true
+
+      - name: Upload build, package, and diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macPad-full-build-inspection
+          path: |
+            packages/*.deb
+            ${{ runner.temp }}/macpad-build/
+          if-no-files-found: warn
+          retention-days: 7
