@@ -28,6 +28,14 @@ jobs:
             brew install ldid
           fi
 
+          if ! command -v dpkg-deb >/dev/null 2>&1; then
+            brew install dpkg
+          fi
+
+          echo "=== Debian package tool ==="
+          command -v dpkg-deb
+          dpkg-deb --version
+          
           echo "=== macOS ==="
           sw_vers
           uname -m
