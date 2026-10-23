@@ -443,3 +443,15 @@ artifact	/tmp/macws_submit_type1_%u_%u.bin	off	diagnostic	Raw type-1 command dum
 artifact	/tmp/macws_stray_rt_c%02u_%02lu_pf%u_a%u.raw	off	Stray diagnostic	One-shot bounded intermediate texture readback created only by /tmp/macws_stray_rt_capture_now; commercial captures stay out of Git.
 artifact	/tmp/macws_stray_buf_c%02u_%02lu_r%u_i%u.raw	off	Stray diagnostic	One-shot bounded intermediate buffer readback created only by /tmp/macws_stray_rt_capture_now; commercial captures stay out of Git.
 artifact	/tmp/macws_vnc_rejected.bgra	off	diagnostic	Rejected VNC frame dump.
+env	MACPAD_ACCOUNT15_CTK	auto	AppleIDSignIn opt-in account diagnostics	Explicit CTK namespace launch contract; consumed only by the account diagnostic helper.
+env	MACPAD_ACCOUNT15_FRONTDOOR	auto	AppleIDSignIn opt-in account diagnostics	Versioned v32 frontdoor contract; required by the private account frontdoor.
+env	MACPAD_ACCOUNT15_LA	auto	AppleIDSignIn opt-in account diagnostics	Explicit LaunchAgent namespace launch contract for the private account diagnostic helper.
+env	MACPAD_ACCOUNT15_REQUIRE_SANDBOX	auto	AppleIDSignIn account service safety gate	Explicit sandbox requirement checked by account-service helpers; preserve the existing fail-closed checks.
+env	MACPAD_ACCOUNT15_USER_SESSION	auto	AppleIDSignIn opt-in account diagnostics	Explicit user-session identity contract consumed by the LaunchAgent namespace helper.
+env	MACPAD_PRIVATE_APPLE_ACCOUNT	auto	AppleIDSignIn opt-in account diagnostics	Explicit opt-in marker for the private Apple account diagnostic path.
+env	MACPAD_TARGET_MACOS_VERSION	auto	AppleIDSignIn opt-in account diagnostics	Exact guest macOS version contract; the current helper checks for 15.6.1.
+env	MACWS_PRIVATE_CACHE_DIR	auto	AppleIDSignIn private cache lifecycle	Explicit private dyld cache directory contract set by the read-only account proxy.
+env	MACWS_PRIVATE_CACHE_LIFECYCLE	auto	AppleIDSignIn private cache lifecycle	Explicit private cache lifecycle marker set by the read-only account proxy.
+env	MACWS_SESSION_CACHE_DIR	auto	AppleIDSignIn isolated user session	Explicit isolated uid-501 cache directory contract.
+env	MACWS_SESSION_TEMP_DIR	auto	AppleIDSignIn isolated user session	Explicit isolated uid-501 temporary directory contract.
+env	MACWS_SESSION_USER_DIR	auto	AppleIDSignIn isolated user session	Explicit isolated uid-501 user directory contract.
