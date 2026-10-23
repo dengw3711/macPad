@@ -1,4 +1,4 @@
-name: macPad Build Prerequisite Check
+name: macPad Build and Validate
 
 on:
   workflow_dispatch:
@@ -7,70 +7,63 @@ permissions:
   contents: read
 
 jobs:
-  prerequisites:
-    name: Check macOS build prerequisites
+  build:
+    name: Build MacWSWindowing on macOS
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Check out macPad
         uses: actions/checkout@v4
 
-      - name: Inspect Apple toolchain
+      - name: Prepare build tools
         run: |
           set -eu
-          echo "=== macOS version ==="
-          sw_vers
-          uname -m
-
-          echo "=== Xcode ==="
-          xcode-select -p
-          xcodebuild -showsdks
-          xcrun --sdk macosx --show-sdk-path
-
-          echo "=== Apple build tools ==="
-          xcrun --find clang
-          xcrun --find ld
-          xcrun --find dyld_info
-          xcrun --find otool
-
-      - name: Prepare GNU Make on temporary runner
-        run: |
-          set -eu
-          echo "=== Homebrew ==="
-          brew --version
-
           if ! command -v gmake >/dev/null 2>&1; then
             brew install make
           fi
 
+          echo "=== macOS ==="
+          sw_vers
+          uname -m
+
+          echo "=== Xcode SDK ==="
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk macosx --show-sdk-path
+
           echo "=== GNU Make ==="
           gmake --version
-          command -v gmake
 
-      - name: Check Theos repository and project files
+      - name: Install Theos in temporary runner
         run: |
           set -eu
 
-          echo "=== Check Theos repository access ==="
-          git ls-remote https://github.com/theos/theos.git HEAD
+          export THEOS="$RUNNER_TEMP/theos"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-          echo "=== Check required project files ==="
+          SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          SDK_NAME="$(basename "$SDK_PATH")"
+
+          mkdir -p "$THEOS/sdks"
+          if [ ! -e "$THEOS/sdks/$SDK_NAME" ]; then
+            ln -s "$SDK_PATH" "$THEOS/sdks/$SDK_NAME"
+          fi
+
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
+
+          test -f "$THEOS/makefiles/common.mk"
+          echo "Theos and the iPhoneOS SDK are ready."
+
+      - name: Check project build requirements
+        run: |
+          set -eu
           test -f Makefile
           test -f config/production.mk
           test -f MacWSWindowing/Makefile
           test -f misc/macws_artifact_contract.py
-          test -f misc/deploy_macwswindowing.sh
-          test -f misc/build_on_ios.sh
 
-          echo "Required project files are present."
-          echo "No project build, package, or deployment was performed."
-
-      - name: Check arm64e build requirements
-        run: |
-          set -eu
-
-          echo "=== Project architecture settings ==="
+          echo "=== Architecture and target settings ==="
           grep -nE 'TARGET|ARCHS|MACWS_WINDOWING_CROSS_PREBUILT' \
             Makefile MacWSWindowing/Makefile
 
@@ -79,5 +72,76 @@ jobs:
           xcrun --find dyld_info
           xcrun --find otool
 
-          echo "Prerequisite checks completed."
-          echo "No iPad connection or device changes were made."
+      - name: Build MacWSWindowing
+        run: |
+          set -eu
+
+          gmake -C MacWSWindowing all \
+            FINALPACKAGE=1 \
+            STRIP=0 \
+            OPTFLAG=-O2 \
+            THEOS_PACKAGE_SCHEME=rootless \
+            GO_EASY_ON_ME=1
+
+          echo "=== Locate build output ==="
+          find MacWSWindowing/.theos -type f \
+            -name 'MacWSWindowing.dylib' -print
+
+          test -f MacWSWindowing/.theos/obj/MacWSWindowing.dylib
+          mkdir -p "$RUNNER_TEMP/macpad-build"
+          cp MacWSWindowing/.theos/obj/MacWSWindowing.dylib \
+            "$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+
+      - name: Validate arm64e authenticated bindings
+        run: |
+          set -eu
+
+          BINARY="$RUNNER_TEMP/macpad-build/MacWSWindowing.dylib"
+
+          file "$BINARY"
+          xcrun dyld_info -arch arm64e -fixups "$BINARY" \
+            > "$RUNNER_TEMP/macpad-build/fixups.txt"
+
+          echo "=== Check authenticated constant-string bindings ==="
+          grep -E 'auth-bind.*key=DA.*__cfstring|auth-bind.*__CFConstantStringClassReference' \
+            "$RUNNER_TEMP/macpad-build/fixups.txt"
+
+          if grep -E 'bind.*__CFConstantStringClassReference' \
+            "$RUNNER_TEMP/macpad-build/fixups.txt" \
+            | grep -v 'auth-bind'; then
+            echo "ERROR: Found a non-authenticated constant-string binding."
+            exit 1
+          fi
+
+          echo "=== Linked libraries ==="
+          xcrun otool -L "$BINARY" \
+            | tee "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+
+          if grep -E '^[[:space:]]*/Library/' \
+            "$RUNNER_TEMP/macpad-build/linked-libraries.txt"; then
+            echo "ERROR: Found a rootful /Library dependency."
+            exit 1
+          fi
+
+          grep -F '@rpath/CydiaSubstrate.framework/CydiaSubstrate' \
+            "$RUNNER_TEMP/macpad-build/linked-libraries.txt"
+
+      - name: Record checksums and build details
+        run: |
+          set -eu
+          cd "$RUNNER_TEMP/macpad-build"
+
+          shasum -a 256 MacWSWindowing.dylib | tee SHA256SUMS
+          file MacWSWindowing.dylib | tee binary-info.txt
+          xcrun --sdk iphoneos --show-sdk-version > sdk-version.txt
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > source-commit.txt
+
+          echo "Build and validation steps completed."
+
+      - name: Upload validated build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: macPad-MacWSWindowing-build
+          path: ${{ runner.temp }}/macpad-build/
+          if-no-files-found: error
+          retention-days: 7
