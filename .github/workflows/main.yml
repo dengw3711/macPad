@@ -19,8 +19,13 @@ jobs:
       - name: Prepare build tools
         run: |
           set -eu
+
           if ! command -v gmake >/dev/null 2>&1; then
             brew install make
+          fi
+
+          if ! command -v ldid >/dev/null 2>&1; then
+            brew install ldid
           fi
 
           echo "=== macOS ==="
@@ -33,6 +38,9 @@ jobs:
 
           echo "=== GNU Make ==="
           gmake --version
+
+          echo "=== ldid signing tool ==="
+          ldid -h
 
       - name: Install Theos in temporary runner
         run: |
